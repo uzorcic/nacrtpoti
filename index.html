@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="sl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>EV načrtovalnik poti v6 – hitre polnilnice</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+<style>
+:root{--bg:#f5f7fb;--panel:#fff;--text:#0f172a;--muted:#64748b;--line:#e2e8f0;--blue:#2563eb;--red:#dc2626;--green:#15803d;--shadow:0 8px 28px rgba(15,23,42,.10)}
+*{box-sizing:border-box} body{margin:0;font:14px/1.35 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text);background:var(--bg)}
+.app{height:100vh;display:grid;grid-template-columns:410px 1fr}.panel{background:var(--panel);z-index:1000;overflow:auto;padding:22px;border-right:1px solid var(--line);box-shadow:var(--shadow)}
+h1{font-size:25px;margin:0 0 3px}.sub{color:var(--muted);margin-bottom:20px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.field{margin:0 0 13px;position:relative}.field.full{grid-column:1/-1}
+label{display:block;font-weight:700;margin:0 0 6px}.hint{font-size:12px;color:var(--muted);margin-top:5px}
+input,select{width:100%;padding:11px 12px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;outline:none;background:white}
+input:focus,select:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.10)}
+button{width:100%;border:0;border-radius:10px;padding:13px 16px;font-weight:800;font-size:15px;cursor:pointer;background:var(--blue);color:white;margin:5px 0 16px}button:disabled{opacity:.55;cursor:wait}
+.card{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:14px;margin:0 0 14px}.card h2{font-size:15px;margin:0 0 10px}.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}.stat{background:white;border:1px solid var(--line);border-radius:9px;padding:10px}.stat b{display:block;font-size:18px;margin-top:2px}.stat span{font-size:11px;color:var(--muted)}
+.stop{display:grid;grid-template-columns:28px 1fr auto;gap:9px;padding:10px 0;border-top:1px solid var(--line);align-items:start}.stop:first-of-type{border-top:0}.dot{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;color:#fff;background:var(--red);font-weight:800;font-size:12px}.dot.start{background:var(--green)}.dot.end{background:#0f172a}.stop small{color:var(--muted)}.right{text-align:right;font-size:12px}
+.warn{color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:10px;border-radius:9px;margin:10px 0}.ok{color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;padding:10px;border-radius:9px;margin:10px 0}.error{color:#991b1b;background:#fef2f2;border:1px solid #fecaca;padding:10px;border-radius:9px;margin:10px 0}.hidden{display:none}
+#map{height:100vh;width:100%}.leaflet-popup-content{font:13px/1.35 Inter,system-ui,sans-serif}.footer{font-size:11px;color:var(--muted);padding-bottom:12px}.pill{display:inline-block;padding:3px 7px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700}
+.autocomplete{position:absolute;z-index:3000;left:0;right:0;top:68px;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 28px rgba(15,23,42,.16);max-height:260px;overflow:auto}
+.autocomplete:empty{display:none}.suggestion{padding:10px 12px;cursor:pointer;border-top:1px solid #eef2f7}.suggestion:first-child{border-top:0}.suggestion:hover,.suggestion.active{background:#eff6ff}.suggestion b{display:block}.suggestion small{color:var(--muted)}
+.checks{display:grid;grid-template-columns:1fr 1fr;gap:7px 12px}.check{display:flex;align-items:center;gap:7px;font-size:13px}.check input{width:auto}
+@media(max-width:800px){.app{display:block}.panel{height:auto;max-height:none;border-right:0}.app #map{height:58vh}.grid{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="panel">
+<h1>⚡ Načrtovalnik poti <small style="font-size:11px;color:#64748b">v6</small></h1>
+<div class="sub">Hitre DC polnilnice ob poti · brez lastne strežniške kode</div>
+
+<div class="field"><label for="from">Začetek</label><input id="from" value="Ljubljana, Slovenija" autocomplete="off"><div id="fromSuggest" class="autocomplete"></div></div>
+<div class="field"><label for="to">Cilj</label><input id="to" value="München, Nemčija" autocomplete="off"><div id="toSuggest" class="autocomplete"></div></div>
+
+<div class="grid">
+<div class="field"><label for="range">Avtocestni doseg</label><input id="range" type="number" min="50" step="1" value="240"><div class="hint">km pri 100 %</div></div>
+<div class="field"><label for="localConsumption">Lokalna poraba</label><input id="localConsumption" type="number" min="5" step="0.1" value="16.5"><div class="hint">kWh / 100 km</div></div>
+<div class="field"><label for="battery">Velikost baterije</label><input id="battery" type="number" min="10" step="0.1" value="60"><div class="hint">uporabna kapaciteta, kWh</div></div>
+<div class="field"><label for="maxPower">Max. moč polnjenja</label><input id="maxPower" type="number" min="10" step="1" value="170"><div class="hint">DC, kW</div></div>
+<div class="field"><label for="minStationPower">Min. moč postaje</label><input id="minStationPower" type="number" min="20" step="10" value="100"><div class="hint">kW; filter hitrih polnilnic</div></div>
+<div class="field"><label for="startSoc">Začetni SOC</label><input id="startSoc" type="number" min="5" max="100" step="1" value="100"><div class="hint">%</div></div>
+<div class="field"><label for="reserveSoc">Rezerva</label><input id="reserveSoc" type="number" min="0" max="30" step="1" value="10"><div class="hint">ciljni minimum, %</div></div>
+<div class="field"><label for="arrivalSoc">Želeni SOC na cilju</label><input id="arrivalSoc" type="number" min="0" max="100" step="1" value="20"><div class="hint">%</div></div>
+<div class="field"><label for="corridor">Oddaljenost od poti</label><input id="corridor" type="number" min="2" max="40" step="1" value="12"><div class="hint">največ km od trase</div></div>
+</div>
+
+<div class="card">
+<h2>Ponudniki hitrega polnjenja</h2>
+<div class="field"><select id="providerPreset">
+<option value="all">Vsi ponudniki</option>
+<option value="tesla">Samo Tesla</option>
+<option value="ionity">Samo IONITY</option>
+<option value="fastned">Samo Fastned</option>
+<option value="allego">Samo Allego</option>
+<option value="enbw">Samo EnBW</option>
+<option value="other">Drugi / neznani ponudniki</option>
+</select></div>
+<div class="checks">
+<label class="check"><input type="checkbox" class="provider" value="Tesla" checked> Tesla</label>
+<label class="check"><input type="checkbox" class="provider" value="IONITY" checked> IONITY</label>
+<label class="check"><input type="checkbox" class="provider" value="Fastned" checked> Fastned</label>
+<label class="check"><input type="checkbox" class="provider" value="Allego" checked> Allego</label>
+<label class="check"><input type="checkbox" class="provider" value="EnBW" checked> EnBW</label>
+<label class="check"><input type="checkbox" class="provider" value="Electra" checked> Electra</label>
+<label class="check"><input type="checkbox" class="provider" value="Aral pulse" checked> Aral pulse</label>
+<label class="check"><input type="checkbox" class="provider" value="Shell Recharge" checked> Shell Recharge</label>
+<label class="check"><input type="checkbox" class="provider" value="E.ON" checked> E.ON</label>
+<label class="check"><input type="checkbox" class="provider" value="MER" checked> MER</label>
+<label class="check"><input type="checkbox" class="provider" value="Petrol" checked> Petrol</label>
+<label class="check"><input type="checkbox" class="provider" value="other" checked> Ostali</label>
+</div>
+<div class="hint">Ponudnik se določi iz OSM oznak brand/operator/network. »Vsi« vključuje tudi manjše in neznane ponudnike.</div>
+</div>
+
+<button id="plan">Izračunaj pot</button>
+<div id="msg" class="hidden"></div>
+
+<div class="card"><h2>Povzetek</h2><div class="stats">
+<div class="stat"><span>Razdalja</span><b id="distance">—</b></div>
+<div class="stat"><span>Čas vožnje</span><b id="driveTime">—</b></div>
+<div class="stat"><span>Polnjenje</span><b id="chargeTime">—</b></div>
+<div class="stat"><span>Postanki</span><b id="stopCount">—</b></div>
+</div><div class="hint" style="margin-top:10px">Avtocestna poraba: <b id="highwayConsumption">—</b>. Lokalni doseg: <b id="localRange">—</b>.</div></div>
+
+<div class="card"><h2>Izvoz poti</h2><div class="grid"><button id="googleExport" type="button" disabled style="margin:0">Google Maps</button><button id="gpxExport" type="button" disabled style="margin:0;background:#475569">GPX</button></div><div class="hint" style="margin-top:8px">Izvozi začetek, cilj in izbrane polnilne postanke.</div></div>
+<div class="card"><h2>Postanki na poti</h2><div id="stops"><div class="hint">Vnesi cilj in klikni »Izračunaj pot«.</div></div></div>
+<div class="footer">Zemljevid: OpenStreetMap. Usmerjanje: OSRM. Polnilnice: OpenStreetMap/Overpass. Autocomplete: Photon; ob izračunu je dodan rezervni geocoder. Podatki o ponudniku, moči, kapaciteti in ceni so odvisni od popolnosti OSM podatkov. OSM ne zagotavlja realnočasnega števila prostih mest, zato ga aplikacija ne ugiba. Čas polnjenja je ocena.</div>
+</aside>
+<main id="map"></main>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+const $=id=>document.getElementById(id);
+const map=L.map('map',{zoomControl:true}).setView([46.8,13.9],6);
+// Alternate public raster source to avoid direct use of tile.openstreetmap.org from file:// pages.
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{
+  maxZoom:19,
+  attribution:'&copy; OpenStreetMap contributors',
+  crossOrigin:false
+}).addTo(map);
+let layers=L.layerGroup().addTo(map);
+let selectedPlaces={from:null,to:null};
+let lastTrip=null;
+
+function showMsg(text,type='ok'){const el=$('msg');el.className=type;el.textContent=text}
+function hideMsg(){$('msg').className='hidden'}
+function fmtMin(min){if(!isFinite(min))return'—';const h=Math.floor(min/60),m=Math.round(min%60);return h?`${h} h ${m} min`:`${m} min`}
+function hav(a,b){const R=6371,dLat=(b[0]-a[0])*Math.PI/180,dLon=(b[1]-a[1])*Math.PI/180;const x=Math.sin(dLat/2)**2+Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
+function debounce(fn,ms=350){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}}
+
+const placeCache=new Map();
+
+function normalizePhoton(j,q){
+ return (j.features||[]).map(f=>{
+   const p=f.properties||{},c=f.geometry.coordinates;
+   const parts=[p.name,p.city,p.county,p.state,p.country].filter((x,i,a)=>x&&a.indexOf(x)===i);
+   return {lat:+c[1],lon:+c[0],name:parts.join(', ')||q,detail:[p.postcode,p.street,p.housenumber].filter(Boolean).join(' ')};
+ });
+}
+async function fetchJson(url,timeout=5500){
+ const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeout);
+ try{
+   const r=await fetch(url,{signal:ctl.signal,headers:{'Accept':'application/json'}});
+   if(!r.ok)throw new Error('HTTP '+r.status);
+   return await r.json();
+ } finally { clearTimeout(timer); }
+}
+
+// Autocomplete uses Photon only. If unavailable, typing remains usable;
+// pressing Enter / Izračunaj performs an explicit one-shot geocode fallback.
+async function autocompleteSearch(q,limit=6){
+ q=q.trim(); if(q.length<2)return[];
+ const key='a:'+q.toLowerCase();
+ if(placeCache.has(key))return placeCache.get(key);
+ try{
+   const j=await fetchJson('https://photon.komoot.io/api/?limit='+limit+'&q='+encodeURIComponent(q),4500);
+   const out=normalizePhoton(j,q); placeCache.set(key,out); return out;
+ }catch(e){
+   console.warn('Autocomplete provider ni dosegljiv:',e);
+   return [];
+ }
+}
+
+async function explicitGeocode(q){
+ q=q.trim(); if(!q)throw new Error('Vnesi ime kraja.');
+ const key='g:'+q.toLowerCase();
+ if(placeCache.has(key))return placeCache.get(key);
+
+ // 1) Photon
+ try{
+   const j=await fetchJson('https://photon.komoot.io/api/?limit=1&q='+encodeURIComponent(q),5500);
+   const x=normalizePhoton(j,q)[0];
+   if(x){placeCache.set(key,x);return x}
+ }catch(e){console.warn('Photon geocode:',e)}
+
+ // 2) Nominatim only for the user's explicit route calculation, NOT autocomplete.
+ // The request is directly triggered by the user and limited to a single result.
+ try{
+   const u='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&q='+encodeURIComponent(q);
+   const j=await fetchJson(u,6500);
+   if(j&&j[0]){
+     const x={lat:+j[0].lat,lon:+j[0].lon,name:j[0].display_name||q,detail:''};
+     placeCache.set(key,x);return x;
+   }
+ }catch(e){console.warn('Nominatim fallback:',e)}
+
+ throw new Error(`Lokacije »${q}« ne najdem oziroma geokodirni servisi trenutno niso dosegljivi.`);
+}
+async function geocode(q){ return explicitGeocode(q); }
+function setupAutocomplete(inputId,boxId){
+ const input=$(inputId),box=$(boxId);
+ const run=debounce(async()=>{
+   const q=input.value.trim(); selectedPlaces[inputId]=null;
+   if(q.length<2){box.innerHTML='';return}
+   try{
+     const list=await autocompleteSearch(q,7);
+     box.innerHTML=list.length
+       ? list.map((x,i)=>`<div class="suggestion" data-i="${i}"><b>${escapeHtml(x.name)}</b>${x.detail?`<small>${escapeHtml(x.detail)}</small>`:''}</div>`).join('')
+       : `<div class="suggestion"><small>Predlogi trenutno niso dosegljivi. Vpiši kraj do konca in klikni »Izračunaj pot«.</small></div>`;
+     [...box.children].forEach((el,i)=>{if(list[i])el.onclick=()=>{const x=list[i];input.value=x.name;selectedPlaces[inputId]=x;box.innerHTML=''}});
+   }catch(e){box.innerHTML=''}
+ },300);
+ input.addEventListener('input',run);
+ input.addEventListener('blur',()=>setTimeout(()=>box.innerHTML='',180));
+}
+setupAutocomplete('from','fromSuggest'); setupAutocomplete('to','toSuggest');
+
+async function route(points){
+ const coords=points.map(p=>`${p.lon},${p.lat}`).join(';');
+ const u=`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`;
+ const r=await fetch(u);if(!r.ok)throw new Error('Izračun cestne poti ni uspel.');const j=await r.json();
+ if(j.code!=='Ok'||!j.routes?.length)throw new Error('Cestne poti ni mogoče izračunati.');return j.routes[0];
+}
+function bboxOf(coords,pad=.30){let minLat=90,maxLat=-90,minLon=180,maxLon=-180;for(const [lon,lat]of coords){minLat=Math.min(minLat,lat);maxLat=Math.max(maxLat,lat);minLon=Math.min(minLon,lon);maxLon=Math.max(maxLon,lon)}return[minLat-pad,minLon-pad,maxLat+pad,maxLon+pad]}
+
+const KNOWN=[
+ ['Tesla',/tesla/i],['IONITY',/ionity/i],['Fastned',/fastned/i],['Allego',/allego/i],
+ ['EnBW',/\benbw\b/i],['Electra',/\belectra\b/i],['Aral pulse',/aral.*pulse/i],
+ ['Shell Recharge',/shell.*recharge|shell recharge/i],['E.ON',/\be[.\- ]?on\b/i],
+ ['MER',/\bmer\b/i],['Petrol',/\bpetrol\b/i]
+];
+function providerOf(tags){
+ const raw=[tags.brand,tags.operator,tags.network,tags.name].filter(Boolean).join(' | ');
+ for(const [name,re]of KNOWN)if(re.test(raw))return name;
+ return 'other';
+}
+function parsePower(tags){
+ const vals=[];
+ for(const [k,v]of Object.entries(tags||{})){
+   if(k==='charging_station:output'||k.endsWith(':output')||k==='maxpower'){
+     const m=String(v).match(/[\d.]+/g)||[]; for(const n of m){let x=+n;if(/mw/i.test(String(v)))x*=1000;if(x>0&&x<1000)vals.push(x)}
+   }
+ }
+ return vals.length?Math.max(...vals):null;
+}
+function selectedProviders(){return new Set([...document.querySelectorAll('.provider:checked')].map(x=>x.value))}
+$('providerPreset').addEventListener('change',e=>{
+ const v=e.target.value, boxes=[...document.querySelectorAll('.provider')];
+ if(v==='all')boxes.forEach(x=>x.checked=true);
+ else if(v==='other')boxes.forEach(x=>x.checked=x.value==='other');
+ else{const map={tesla:'Tesla',ionity:'IONITY',fastned:'Fastned',allego:'Allego',enbw:'EnBW'};boxes.forEach(x=>x.checked=x.value===map[v])}
+});
+
+async function chargersInBBox(b,minPower){
+ const [s,w,n,e]=b;
+ // Query all EV charging stations; filtering for DC power/provider happens client-side.
+ const q=`[out:json][timeout:40];(nwr["amenity"="charging_station"](${s},${w},${n},${e}););out center tags;`;
+ const endpoints=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+ let lastErr;
+ for(const ep of endpoints){
+   try{
+     const r=await fetch(ep,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:'data='+encodeURIComponent(q)});
+     if(!r.ok)throw new Error('HTTP '+r.status);
+     const j=await r.json();
+     const seen=new Set();
+     return j.elements.map(x=>{
+       const tags=x.tags||{},lat=x.lat??x.center?.lat,lon=x.lon??x.center?.lon,power=parsePower(tags),provider=providerOf(tags);
+       const name=tags.name||tags.brand||tags.operator||tags.network||'Hitra polnilnica';
+       const capacity=parseInt(tags.capacity,10); const charge=tags.charge||null,fee=tags.fee||null; return {lat,lon,name,power,provider,tags,capacity:Number.isFinite(capacity)?capacity:null,charge,fee};
+     }).filter(x=>{
+       if(!isFinite(x.lat)||!isFinite(x.lon))return false;
+       const key=x.lat.toFixed(5)+','+x.lon.toFixed(5);if(seen.has(key))return false;seen.add(key);
+       // If OSM has no output value, retain it: it may still be a fast charger. Known AC-only sockets are excluded.
+       const hasDC=Object.keys(x.tags).some(k=>/^socket:(ccs|chademo|tesla_supercharger|nacs)/i.test(k));
+       const knownSlow=x.power!=null&&x.power<minPower;
+       return !knownSlow && (x.power==null || x.power>=minPower || hasDC);
+     });
+   }catch(e){lastErr=e}
+ }
+ throw new Error('Podatkov o polnilnicah trenutno ni mogoče dobiti.');
+}
+function routeMetrics(coords){let cum=[0];for(let i=1;i<coords.length;i++)cum[i]=cum[i-1]+hav([coords[i-1][1],coords[i-1][0]],[coords[i][1],coords[i][0]]);return cum}
+function projectToRoute(ch,coords,cum){let best={d:1e9,km:0};const step=Math.max(1,Math.floor(coords.length/1800));for(let i=0;i<coords.length;i+=step){const d=hav([ch.lat,ch.lon],[coords[i][1],coords[i][0]]);if(d<best.d)best={d,km:cum[i]}}return best}
+function selectStops(chargers,coords,totalKm,startSoc,reserveSoc,arrivalSoc,rangeKm,corridor){
+ const cum=routeMetrics(coords),providers=selectedProviders();
+ const along=chargers.map(c=>({...c,...projectToRoute(c,coords,cum)})).filter(c=>c.d<=corridor&&providers.has(c.provider)).sort((a,b)=>a.km-b.km);
+ let pos=0,soc=startSoc,selected=[],guard=0;
+ while(guard++<25){
+   const finalNeedPct=(totalKm-pos)/rangeKm*100+arrivalSoc; if(soc>=finalNeedPct)break; const available=rangeKm*Math.max(0,(soc-reserveSoc)/100);
+   const maxReach=pos+available,minUseful=pos+Math.min(35,available*.25);
+   const candidates=along.filter(c=>c.km>minUseful&&c.km<=maxReach+2&&!selected.includes(c));
+   if(!candidates.length)return{selected,failAt:pos,maxReach,along};
+   // Score: progress first, then less detour and higher known power.
+   candidates.sort((a,b)=>(b.km-a.km)*10+(a.d-b.d)+(b.power||0)/200-(a.power||0)/200);
+   const c=candidates[0],leg=c.km-pos;soc=Math.max(reserveSoc,soc-leg/rangeKm*100);
+   const remaining=totalKm-c.km,needAtStop=remaining/rangeKm*100+arrivalSoc; const targetSoc=needAtStop<=100?Math.min(100,Math.max(soc+5,needAtStop+2)):Math.min(85,Math.max(60,reserveSoc+70));
+   selected.push({...c,arrivalSoc:soc,targetSoc});pos=c.km;soc=targetSoc;
+ }
+ return{selected,along};
+}
+function chargingMinutes(a,b,battery,maxVehicle,stationPower){
+ const cap=Math.min(maxVehicle,stationPower||maxVehicle),bands=[[0,50,1],[50,70,.78],[70,85,.52],[85,100,.28]];let hours=0;
+ for(const[lo,hi,f]of bands){const x=Math.max(a,lo),y=Math.min(b,hi);if(y>x)hours+=battery*((y-x)/100)/(cap*f)}return hours*60;
+}
+function marker(lat,lon,color,label,popup=''){return L.circleMarker([lat,lon],{radius:8,color:'#fff',weight:3,fillColor:color,fillOpacity:1}).bindTooltip(label,{direction:'top'}).bindPopup(popup||label).addTo(layers)}
+function providerLabel(p){return p==='other'?'Drugi / neznan':p}
+
+async function plan(){
+ hideMsg();$('plan').disabled=true;$('plan').textContent='Računam …';layers.clearLayers();
+ try{
+  const range=+$('range').value,local=+$('localConsumption').value,battery=+$('battery').value,maxPower=+$('maxPower').value,minStationPower=+$('minStationPower').value,startSoc=+$('startSoc').value,reserve=+$('reserveSoc').value,arrivalSoc=+$('arrivalSoc').value,corridor=+$('corridor').value;
+  if([range,local,battery,maxPower,minStationPower,startSoc,reserve,arrivalSoc,corridor].some(x=>!isFinite(x)||x<0))throw new Error('Preveri podatke vozila.');
+  if(startSoc<=reserve)throw new Error('Začetni SOC mora biti višji od rezerve.');
+  if(!selectedProviders().size)throw new Error('Izberi vsaj enega ponudnika polnjenja.');
+  const highway=battery/range*100,localRange=battery/local*100;$('highwayConsumption').textContent=highway.toFixed(1)+' kWh/100 km';$('localRange').textContent=Math.round(localRange)+' km';
+  showMsg('Iščem lokaciji in cestno pot …','ok');
+  const from=selectedPlaces.from||await geocode($('from').value),to=selectedPlaces.to||await geocode($('to').value);
+  const base=await route([from,to]),coords=base.geometry.coordinates,totalKm=base.distance/1000;
+  showMsg('Iščem hitre polnilnice ob poti …','ok');
+  const chargers=await chargersInBBox(bboxOf(coords),minStationPower);
+  const sel=selectStops(chargers,coords,totalKm,startSoc,reserve,arrivalSoc,range,corridor);
+  if(sel.failAt!=null)throw new Error(`Z izbranimi ponudniki in dosegom ne najdem dosegljive hitre polnilnice po približno ${Math.round(sel.failAt)} km. Povečaj koridor, izberi več ponudnikov ali znižaj minimalno moč.`);
+  const waypoints=[from,...sel.selected.map(s=>({lat:s.lat,lon:s.lon})),to],finalRoute=await route(waypoints),finalKm=finalRoute.distance/1000,driveMin=finalRoute.duration/60;
+  let totalCharge=0;sel.selected.forEach(s=>totalCharge+=chargingMinutes(s.arrivalSoc,s.targetSoc,battery,maxPower,s.power));
+  $('distance').textContent=Math.round(finalKm)+' km';$('driveTime').textContent=fmtMin(driveMin);$('chargeTime').textContent=fmtMin(totalCharge);$('stopCount').textContent=sel.selected.length;
+  const line=L.geoJSON(finalRoute.geometry,{style:{color:'#2563eb',weight:6,opacity:.9}}).addTo(layers);map.fitBounds(line.getBounds(),{padding:[30,30]}); lastTrip={from,to,stops:sel.selected,route:finalRoute}; $('googleExport').disabled=false;$('gpxExport').disabled=false;
+  marker(from.lat,from.lon,'#15803d','Začetek');marker(to.lat,to.lon,'#0f172a','Cilj');
+  sel.selected.forEach((s,i)=>marker(s.lat,s.lon,'#dc2626',`${i+1}. ${s.name}`,`<b>${escapeHtml(s.name)}</b><br>${escapeHtml(providerLabel(s.provider))}${s.power?` · do ~${Math.round(s.power)} kW`:''}`));
+  const rows=[];rows.push(`<div class="stop"><div class="dot start">A</div><div><b>${escapeHtml(shortName(from.name))}</b><br><small>Začetek · ${startSoc.toFixed(0)} %</small></div><div class="right">0 km</div></div>`);
+  sel.selected.forEach((s,i)=>{const min=chargingMinutes(s.arrivalSoc,s.targetSoc,battery,maxPower,s.power);rows.push(`<div class="stop"><div class="dot">${i+1}</div><div><b>${escapeHtml(s.name)}</b><br><small>${escapeHtml(providerLabel(s.provider))} · ${s.arrivalSoc.toFixed(0)} → ${s.targetSoc.toFixed(0)} % · ≈ ${Math.round(min)} min${s.power?` · do ~${Math.round(s.power)} kW`:' · moč ni v OSM'}${s.capacity!=null?` · ${s.capacity} mest`:''}${s.charge?` · cena: ${escapeHtml(s.charge)}`:(s.fee==='no'?' · brezplačno':'')}</small></div><div class="right">≈ ${Math.round(s.km)} km<br><span class="pill">${escapeHtml(providerLabel(s.provider))}</span></div></div>`)});
+  const lastPos=sel.selected.length?sel.selected.at(-1).km:0,lastSoc=sel.selected.length?sel.selected.at(-1).targetSoc:startSoc,endSoc=Math.max(0,lastSoc-(totalKm-lastPos)/range*100);
+  rows.push(`<div class="stop"><div class="dot end">B</div><div><b>${escapeHtml(shortName(to.name))}</b><br><small>Cilj · ocena ${endSoc.toFixed(0)} %</small></div><div class="right">${Math.round(finalKm)} km</div></div>`);$('stops').innerHTML=rows.join('');
+  showMsg(sel.selected.length?`Pot izračunana. Predlaganih postankov: ${sel.selected.length}.`:'Cilj je dosegljiv brez polnjenja.','ok');
+ }catch(e){console.error(e);showMsg(e.message||'Prišlo je do napake.','error')}
+ finally{$('plan').disabled=false;$('plan').textContent='Izračunaj pot'}
+}
+function shortName(s){return s.split(',').slice(0,2).join(',')}
+function escapeHtml(s){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+
+const SETTINGS_IDS=['range','localConsumption','battery','maxPower','minStationPower','startSoc','reserveSoc','arrivalSoc','corridor','providerPreset'];
+function saveSettings(){const data={};SETTINGS_IDS.forEach(id=>data[id]=$(id).value);data.providers=[...document.querySelectorAll('.provider:checked')].map(x=>x.value);try{localStorage.setItem('evPlannerSettingsV6',JSON.stringify(data))}catch(e){}}
+function loadSettings(){try{const data=JSON.parse(localStorage.getItem('evPlannerSettingsV6')||'null');if(!data)return;SETTINGS_IDS.forEach(id=>{if(data[id]!=null)$(id).value=data[id]});if(Array.isArray(data.providers)){const set=new Set(data.providers);document.querySelectorAll('.provider').forEach(x=>x.checked=set.has(x.value))}}catch(e){}}
+loadSettings(); SETTINGS_IDS.forEach(id=>$(id).addEventListener('change',saveSettings));document.querySelectorAll('.provider').forEach(x=>x.addEventListener('change',saveSettings));
+function googleMapsUrl(){if(!lastTrip)return null;const params=new URLSearchParams({api:'1',origin:`${lastTrip.from.lat},${lastTrip.from.lon}`,destination:`${lastTrip.to.lat},${lastTrip.to.lon}`,travelmode:'driving'});if(lastTrip.stops.length)params.set('waypoints',lastTrip.stops.slice(0,9).map(s=>`${s.lat},${s.lon}`).join('|'));return 'https://www.google.com/maps/dir/?'+params.toString()}
+$('googleExport').addEventListener('click',()=>{const u=googleMapsUrl();if(u)window.open(u,'_blank','noopener')});
+function xmlEsc(s){return String(s).replace(/[<>&'"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;',"'":'&apos;','"':'&quot;'}[c]))}
+$('gpxExport').addEventListener('click',()=>{if(!lastTrip)return;const pts=lastTrip.route.geometry.coordinates.map(c=>`<trkpt lat="${c[1]}" lon="${c[0]}"></trkpt>`).join('');const wpts=[{...lastTrip.from,name:'Začetek'},...lastTrip.stops.map(s=>({...s,name:s.name+' – '+providerLabel(s.provider)})),{...lastTrip.to,name:'Cilj'}].map(x=>`<wpt lat="${x.lat}" lon="${x.lon}"><name>${xmlEsc(x.name)}</name></wpt>`).join('');const gpx=`<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="EV Planner v6" xmlns="http://www.topografix.com/GPX/1/1">${wpts}<trk><name>EV pot</name><trkseg>${pts}</trkseg></trk></gpx>`;const blob=new Blob([gpx],{type:'application/gpx+xml'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='ev-pot.gpx';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
+
+$('plan').addEventListener('click',plan);[$('from'),$('to')].forEach(el=>el.addEventListener('keydown',e=>{if(e.key==='Enter')plan()}));
+</script>
+</body>
+</html>
